@@ -1,0 +1,4 @@
+PyMySQL
+python-dotenv
+requests
+DBUtils>=3.0.0
