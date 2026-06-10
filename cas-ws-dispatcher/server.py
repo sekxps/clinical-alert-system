@@ -27,7 +27,7 @@ class ConnectionManager:
                                    a.detail as message, a.alerted_at as timestamp 
                             FROM alerts a
                             JOIN criteria c ON a.criteria_id = c.id
-                            WHERE a.seen = 0
+                            WHERE a.seen = 0 AND a.resolved_at IS NULL
                             ORDER BY a.id ASC
                         """
                         await cur.execute(query)
@@ -154,9 +154,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             async with pool.acquire() as conn:
                                 async with conn.cursor() as cur:
                                     await cur.execute(
-                                        "UPDATE alerts SET seen = 1, resolved_at = NOW() WHERE id = %s",
+                                        "UPDATE alerts SET seen = 1 WHERE id = %s",
                                         (alert_id,)
                                     )
+                                    await conn.commit()
                         print(f"Acknowledged alert ID: {alert_id}")
                         # Removed dismiss broadcast so other machines keep their popups
             except Exception as e:

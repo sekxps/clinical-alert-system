@@ -60,7 +60,6 @@ def _build_risk_details_section(detail_str: str) -> list:
             "weight": "bold", "size": "sm", "margin": "md", "color": "#d4380d",
         },
     ]
-    # Split the detail string using the predefined pipe separator logic
     risk_details = [d.strip() for d in detail_str.split('|') if d.strip()]
     for detail in risk_details:
         section.append({
@@ -89,19 +88,14 @@ def _send_via_morpromt(flex_message: dict, visit_number: str, label: str) -> Non
         logger.error(f"Failed to send {label} for Visit {visit_number}: {e}")
 
 def print_alert(alert_data):
-    """
-    Print formatted alert to console.
-    alert_data: {visit_id, criteria_name, category, severity, detail, timestamp, change_type}
-    """
+    """Print formatted alert to console."""
     ts = alert_data.get('timestamp', datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
     ct = alert_data.get('change_type', '')
 
     if ct == 'HIGH_TO_NOT':
         header_text = "✅ [CANCEL ALERT] Target conditions resolved"
-    elif ct == 'HIGH_TO_HIGH':
-        header_text = "⚠️ [UPDATE ALERT] Triggered by CC modification"
     elif ct == 'NOT_TO_HIGH':
-        header_text = "🚨 [NEW ALERT] Risk detected from history update"
+        header_text = "🚨 [NEW ALERT] Risk detected"
     else:
         header_text = "🚨 CLINICAL ALERT"
 
@@ -128,17 +122,11 @@ def send_line(alert_data: dict) -> None:
     patient_name = str(metadata.get('patient_name', '-'))
     criteria_name = alert_data.get('criteria_name', 'Clinical Alert')
 
-    # Determine styles based on change_type
-    if change_type == "NOT_TO_HIGH" or change_type == "NEW_ALERT":
+    if change_type == "NOT_TO_HIGH":
         header_text = criteria_name
         sub_text = "🚨 พบผู้ป่วยเข้าเกณฑ์ / ความเสี่ยงใหม่"
         header_color = "#cf1322"  # Deep Red
         alt_text = f"🚨 {criteria_name}: {patient_name}"
-    elif change_type == "HIGH_TO_HIGH":
-        header_text = criteria_name
-        sub_text = "⚠️ ข้อมูลผู้ป่วยถูกปรับปรุง (ยังอยู่ในกลุ่มเสี่ยง)"
-        header_color = "#d46b08"  # Burnt Orange
-        alt_text = f"⚠️ อัพเดทข้อมูล: {patient_name}"
     elif change_type == "HIGH_TO_NOT":
         header_text = criteria_name
         sub_text = "🟢 ผู้ป่วยไม่อยู่ในกลุ่มเสี่ยงแล้ว (ข้อมูลถูกแก้ไข)"
@@ -173,18 +161,9 @@ def send_line(alert_data: dict) -> None:
         },
     }
 
-    _send_via_morpromt(flex_message, visit_id, f"CC change alert ({change_type})")
-
-def notify_gui_clients(alert_data):
-    """
-    Stub for Pushing notifications to GUI clients.
-    """
-    # TODO: Implement WebSocket/Push notification
-    logger.debug(f"Stub: notify_gui_clients for visit {alert_data.get('visit_id')}")
-    pass
+    _send_via_morpromt(flex_message, visit_id, f"LINE alert ({change_type})")
 
 def fire_alert(alert_data):
     """Main entry point for firing an alert across all channels."""
     print_alert(alert_data)
     send_line(alert_data)
-    notify_gui_clients(alert_data)

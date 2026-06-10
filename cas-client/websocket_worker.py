@@ -1,16 +1,20 @@
+import os
 import json
 import time
 import websocket
 from PyQt6.QtCore import QThread, pyqtSignal
+
+# Read server URL from env var, fallback to localhost
+WS_URL = os.environ.get("CAS_WS_URL", "ws://localhost:8000/ws/alerts")
 
 class WebSocketWorker(QThread):
     new_alert_signal = pyqtSignal(dict)
     dismiss_alert_signal = pyqtSignal(int)
     connection_status_signal = pyqtSignal(bool)
 
-    def __init__(self, url="ws://localhost:8000/ws/alerts"):
+    def __init__(self, url=None):
         super().__init__()
-        self.url = url
+        self.url = url or WS_URL
         self.ws = None
         self._is_running = True
 
@@ -37,7 +41,6 @@ class WebSocketWorker(QThread):
         try:
             data = json.loads(message)
             if data.get("action") == "dismiss":
-                # Handle dismissal
                 alert_id = data.get("id")
                 if alert_id is not None:
                     self.dismiss_alert_signal.emit(int(alert_id))
@@ -54,7 +57,7 @@ class WebSocketWorker(QThread):
         self.connection_status_signal.emit(False)
 
     def on_open(self, ws):
-        print("WebSocket Connected")
+        print(f"WebSocket Connected to {self.url}")
         self.connection_status_signal.emit(True)
 
     def send_message(self, message_dict):

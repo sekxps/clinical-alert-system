@@ -3,8 +3,8 @@ from pathlib import Path
 import aiomysql
 from dotenv import load_dotenv
 
-# Load .env from the main CAS folder
-env_path = Path(__file__).parent.parent / "cas" / ".env"
+# Load .env from the current cas-ws-dispatcher folder
+env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 pool = None

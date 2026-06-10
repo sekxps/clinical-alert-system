@@ -1,6 +1,6 @@
 import logging
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from db import get_his_conn, get_cas_conn
 from alert import fire_alert
@@ -60,7 +60,7 @@ class ClinicalAlertEngine:
             SELECT VS.vn AS visit_id, OS.cc
             FROM vn_stat VS
             LEFT JOIN opdscreen OS ON OS.vn = VS.vn
-            WHERE VS.vstdate = "2026-06-09"
+            WHERE VS.vstdate = CURDATE()
               AND OS.cc IS NOT NULL
               AND OS.cc != ''
         """
@@ -138,15 +138,17 @@ class ClinicalAlertEngine:
 
         cc_changed = (old_cc_hash != new_cc_hash)
         detail_changed = (existing is None) or (existing.get('detail_hash') != new_detail_hash)
-        change_type = f"{'HIGH' if old_risk else 'NOT'}_TO_{'HIGH' if new_risk else 'NOT'}"
         
         metadata = {k: v for k, v in result.items() if k not in ('visit_id', 'is_alert', 'detail')}
 
-        if (old_cc_hash is None) and (existing is None):
-            if new_risk == 1:
+        # --- First visit ever (no CC hash tracked yet) ---
+        if old_cc_hash is None:
+            if new_risk == 1 and existing is None:
                 self._insert_alert(cas_conn, visit_id, criteria, detail, new_detail_hash)
-                self._fire_alert_wrapper(visit_id, criteria, detail, 'NEW_ALERT', metadata)
+                self._fire_alert_wrapper(visit_id, criteria, detail, 'NOT_TO_HIGH', metadata)
             return
+
+        change_type = f"{'HIGH' if old_risk else 'NOT'}_TO_{'HIGH' if new_risk else 'NOT'}"
 
         if change_type == 'NOT_TO_NOT':
             pass
@@ -163,7 +165,7 @@ class ClinicalAlertEngine:
             if cc_changed or detail_changed:
                 self._log_cc_change(cas_conn, visit_id, criteria_id, old_cc_hash, new_cc_hash, old_risk, new_risk, change_type)
                 self._update_alert(cas_conn, existing['id'], detail, new_detail_hash)
-                self._fire_alert_wrapper(visit_id, criteria, detail, change_type, metadata)
+                # ไม่ส่ง LINE สำหรับ HIGH_TO_HIGH — อัปเดต DB เก็บไว้เท่านั้น
                 
         elif change_type == 'HIGH_TO_NOT':
             self._log_cc_change(cas_conn, visit_id, criteria_id, old_cc_hash, new_cc_hash, old_risk, new_risk, change_type)
@@ -183,7 +185,6 @@ class ClinicalAlertEngine:
         """
         with cas_conn.cursor() as cursor:
             cursor.execute(sql, (visit_id, criteria['id'], detail, detail_hash, criteria['severity']))
-        cas_conn.commit()
 
     def _update_alert(self, cas_conn, alert_id, detail, detail_hash):
         sql = """
@@ -193,13 +194,11 @@ class ClinicalAlertEngine:
         """
         with cas_conn.cursor() as cursor:
             cursor.execute(sql, (detail, detail_hash, alert_id))
-        cas_conn.commit()
 
     def _resolve_alert(self, cas_conn, alert_id):
         sql = "UPDATE alerts SET resolved_at=NOW() WHERE id=%s"
         with cas_conn.cursor() as cursor:
             cursor.execute(sql, (alert_id,))
-        cas_conn.commit()
 
     def _fetch_known_cc_hashes(self, cas_conn):
         """Fetch all previously evaluated CC hashes from CAS DB."""
@@ -220,7 +219,6 @@ class ClinicalAlertEngine:
         """
         with cas_conn.cursor() as cursor:
             cursor.execute(sql, (visit_id, cc_hash))
-        cas_conn.commit()
 
     def _log_cc_change(self, cas_conn, visit_id, criteria_id, old_cc_hash, new_cc_hash, old_risk, new_risk, change_type):
         """Audit trail for the 4 CC edit states."""
@@ -230,7 +228,6 @@ class ClinicalAlertEngine:
         """
         with cas_conn.cursor() as cursor:
             cursor.execute(sql, (visit_id, criteria_id, old_cc_hash, new_cc_hash, old_risk, new_risk, change_type))
-        cas_conn.commit()
 
     def _fire_alert_wrapper(self, visit_id, criteria, detail, change_type, metadata=None):
         alert_data = {
@@ -244,7 +241,3 @@ class ClinicalAlertEngine:
             'metadata': metadata or {}
         }
         fire_alert(alert_data)
-
-
-
-

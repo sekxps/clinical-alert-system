@@ -29,9 +29,9 @@ class ToastNotification(QWidget):
         container.setObjectName("toastContainer")
         container_layout = QVBoxLayout(container)
         
-        # Styling based on severity
-        alert_type = alert_data.get('type', '')
-        severity_color = "#e74c3c" if "MI EKG" in alert_type or "Stroke" in alert_type else "#e67e22"
+        # Styling based on severity field from the alert data
+        severity = alert_data.get('severity', 'warning')
+        severity_color = {"critical": "#e74c3c", "warning": "#e67e22", "info": "#3498db"}.get(severity, "#e67e22")
         container.setStyleSheet(f"""
             #toastContainer {{
                 background-color: #2c3e50;
@@ -44,6 +44,7 @@ class ToastNotification(QWidget):
         """)
         
         # Title
+        alert_type = alert_data.get('type', 'Clinical Alert')
         title = QLabel(f"🔴 {alert_type}")
         title_font = QFont("Segoe UI", 12, QFont.Weight.Bold)
         title.setFont(title_font)
