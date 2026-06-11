@@ -65,7 +65,9 @@ class ConnectionManager:
                                    a.detail AS message, a.alerted_at AS timestamp
                             FROM alerts a
                             JOIN criteria c ON a.criteria_id = c.id
-                            WHERE a.seen = 0 AND a.resolved_at IS NULL
+                            WHERE a.seen = 0 
+                              AND a.resolved_at IS NULL
+                              AND a.alerted_at >= NOW() - INTERVAL 24 HOUR
                             ORDER BY a.id ASC
                         """
                         await cur.execute(query)
