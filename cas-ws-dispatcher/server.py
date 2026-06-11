@@ -53,36 +53,6 @@ class ConnectionManager:
             f"Client connected: {websocket.client}. "
             f"Total connections: {len(self.active_connections)}"
         )
-        # Send backlog of unseen, unresolved alerts to the newly-connected client
-        pool = get_pool()
-        his_pool = get_his_pool()
-        if pool:
-            try:
-                async with pool.acquire() as conn:
-                    async with conn.cursor(aiomysql.DictCursor) as cur:
-                        query = """
-                            SELECT a.id, a.visit_id, c.name AS type,
-                                   a.detail AS message, a.alerted_at AS timestamp
-                            FROM alerts a
-                            JOIN criteria c ON a.criteria_id = c.id
-                            WHERE a.seen = 0 
-                              AND a.resolved_at IS NULL
-                              AND a.alerted_at >= NOW() - INTERVAL 24 HOUR
-                            ORDER BY a.id ASC
-                        """
-                        await cur.execute(query)
-                        alerts = await cur.fetchall()
-                        for alert in alerts:
-                            if alert.get("timestamp"):
-                                alert["timestamp"] = alert["timestamp"].isoformat()
-                            await attach_his_metadata(alert, his_pool)
-                            alert["action"] = "alert"
-                            await websocket.send_text(json.dumps(alert, default=str))
-                logger.info(
-                    f"Sent {len(alerts)} backlog alert(s) to new client {websocket.client}."
-                )
-            except Exception:
-                logger.exception(f"Error sending backlog to client {websocket.client}.")
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
