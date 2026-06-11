@@ -217,6 +217,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Log files
-**/logs/*
+# Log files — never commit log outputs
+**/logs/*.log
+**/logs/*.log.*
 !**/logs/.gitkeep
+
+# Local environment overrides
+.env.local

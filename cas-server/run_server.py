@@ -2,7 +2,7 @@ import sys
 import time
 import logging
 import logging.handlers
-from config import LOG_DIR, POLL_INTERVAL_SEC
+from config import LOG_DIR, POLL_INTERVAL_SEC, validate_config
 from engine import ClinicalAlertEngine
 
 # Ensure Thai characters display correctly in Windows terminal
@@ -11,7 +11,9 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-# Setup Logging
+# ---------------------------------------------------------------------------
+# Logging Setup
+# ---------------------------------------------------------------------------
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 log_file = LOG_DIR / "cas_server.log"
 
@@ -22,20 +24,30 @@ logging.basicConfig(
     handlers=[
         logging.StreamHandler(sys.stdout),
         logging.handlers.TimedRotatingFileHandler(
-            str(log_file), when="midnight", interval=1, backupCount=30, encoding="utf-8"
+            str(log_file),
+            when="midnight",
+            interval=1,
+            backupCount=30,
+            encoding="utf-8",
         ),
     ],
 )
 logger = logging.getLogger("CAS_Entry")
 
+
 def main():
     logger.info("=" * 60)
-    logger.info("  CLINICAL ALERT SYSTEM (CAS) — SERVER STARTED")
-    logger.info(f"  Poll interval: every {POLL_INTERVAL_SEC} seconds")
+    logger.info("  CLINICAL ALERT SYSTEM (CAS) — SERVER STARTING")
+    logger.info(f"  Poll interval : every {POLL_INTERVAL_SEC} second(s)")
     logger.info("=" * 60)
 
+    # Validate configuration before connecting to any database
+    if not validate_config():
+        logger.critical("Configuration validation failed — server will not start.")
+        sys.exit(1)
+
     engine = ClinicalAlertEngine()
-    
+
     cycle = 0
     while True:
         cycle += 1
@@ -44,11 +56,12 @@ def main():
             engine.run_cycle()
         except KeyboardInterrupt:
             raise
-        except Exception as e:
-            logger.exception(f"Unexpected error in main loop: {e}")
+        except Exception:
+            logger.exception("Unexpected error in main loop — continuing after sleep.")
 
         logger.info(f"Sleeping for {POLL_INTERVAL_SEC}s...")
         time.sleep(POLL_INTERVAL_SEC)
+
 
 if __name__ == "__main__":
     try:

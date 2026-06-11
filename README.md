@@ -1,61 +1,127 @@
 # Clinical Alert System (CAS)
 
-Real-time Clinical Alert System for hospital workstations. This system is designed to provide immediate, actionable alerts to clinical staff, ensuring synchronized notifications across multiple clients.
+Real-time Clinical Alert System for hospital workstations. Provides immediate, actionable alerts to clinical staff with synchronized notifications across all connected clients.
 
 ## Architecture
 
-This repository is structured as a monorepo containing three core components:
+```
+ ┌─────────────────┐     SQL (batch)      ┌──────────────┐
+ │   HIS Database  │◄─────────────────────│  cas-server  │
+ │  (HOSxP/etc.)   │                      │  (Engine)    │
+ └─────────────────┘                      └──────┬───────┘
+                                                 │ HTTP POST /ws/dispatch
+ ┌─────────────────┐     SQL (read/ack)   ┌──────▼───────────────┐
+ │   CAS Database  │◄─────────────────────│  cas-ws-dispatcher   │
+ │  (alerts, etc.) │                      │  (FastAPI + WS)      │
+ └─────────────────┘                      └──────┬───────────────┘
+                                                 │ ws://  (broadcast)
+                                      ┌──────────▼──────────┐
+                                      │     cas-client       │
+                                      │  (PyQt6 tray app)    │
+                                      │  [workstation 1..N]  │
+                                      └─────────────────────┘
+```
 
-*   **`cas-server`**: The central backend engine. It connects to the HIS database, fetches real-time patient metadata, processes alert rules (Modular Clinical Alert Engine), and handles the core business logic.
-*   **`cas-ws-dispatcher`**: The WebSocket dispatcher service responsible for managing real-time connections with clients. It broadcasts alerts and synchronizes state (such as cross-client "Acknowledge" dismissals).
-*   **`cas-client`**: The desktop notification client application installed on hospital workstations. It displays formatted alerts (similar to LINE alerts) and allows users to interact with and acknowledge them.
+### Components
+
+| Component | Description |
+|---|---|
+| **`cas-server`** | Core engine — polls HIS DB, evaluates clinical alert rules, dispatches alerts via WebSocket. |
+| **`cas-ws-dispatcher`** | FastAPI WebSocket hub — manages client connections, enriches alerts with HIS metadata, persists acknowledgements. |
+| **`cas-client`** | Windows desktop tray application — displays toast notifications, allows per-workstation acknowledgement. |
 
 ## Features
 
-*   **Synchronized Acknowledgement**: Alerts dismissed on one workstation are automatically cleared across all connected clients in real-time.
-*   **Modular Alert Engine**: Extensible architecture designed to easily plug in new clinical alert types (e.g., MI EKG, Sepsis, Stroke) via `BaseAlertRule` class and modular notification handlers.
-*   **Real-time Patient Metadata**: Detailed information fetched directly from the HIS database ensuring rich and actionable desktop notifications.
-*   **Centralized Configuration**: Clean, production-ready codebase using a unified monorepo structure.
+- **Synchronized Acknowledgement** — alerts dismissed on one workstation are cleared across all connected clients in real-time.
+- **4-State Change Detection** — never spams alerts; intelligently detects `NOT_TO_NOT`, `NOT_TO_HIGH`, `HIGH_TO_HIGH`, `HIGH_TO_NOT` transitions per visit.
+- **Batch SQL Engine** — single query per criteria eliminates N+1 patterns; keeps HIS DB load minimal.
+- **Modular Alert Rules** — new clinical alert types (Sepsis, Stroke, etc.) added by inserting a row into the `criteria` table — no code changes needed.
+- **LINE Notifications** — optional Morpromt API integration for LINE group alerts.
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
+- Python **3.9+**
+- MySQL / MariaDB access to both HIS and CAS databases
+- Windows workstations for `cas-client`
 
-Ensure you have Python 3.8+ installed. It's recommended to use virtual environments (`venv`) for each subsystem.
+## Setup Order
+
+> Run the services in this order: **Dispatcher → Server → Client(s)**
 
 ### 1. CAS WebSocket Dispatcher (`cas-ws-dispatcher`)
-
-This service manages the real-time connections. Run this first.
 
 ```bash
 cd cas-ws-dispatcher
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
+copy .env.example .env          # then edit .env with your DB credentials
 uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
 ### 2. CAS Server (`cas-server`)
-
-The core engine that polls the HIS database and triggers alerts.
 
 ```bash
 cd cas-server
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
-# Make sure to configure your .env file here based on .env.example
+copy .env.example .env          # then edit .env with your DB credentials
+python sql\schema.sql           # initialise CAS DB tables (run once)
+python sql\seed.sql             # load default alert criteria (run once)
 python run_server.py
 ```
 
 ### 3. CAS Client (`cas-client`)
 
-The desktop client that receives notifications.
+Install on each clinical workstation:
 
 ```bash
 cd cas-client
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
+copy .env.example .env          # set CAS_WS_URL=ws://<dispatcher_ip>:8000/ws/alerts
 python main.py
 ```
+
+## Environment Variables Reference
+
+### `cas-server/.env`
+
+| Variable | Required | Description |
+|---|---|---|
+| `HIS_HOST` | ✅ | HIS database hostname/IP |
+| `HIS_PORT` | ✅ | HIS database port (default `3306`) |
+| `HIS_USER` | ✅ | HIS DB user — **must be READ-ONLY** |
+| `HIS_PASSWORD` | ✅ | HIS DB password |
+| `HIS_DATABASE` | ✅ | HIS database name |
+| `CAS_HOST` | ✅ | CAS database hostname/IP |
+| `CAS_PORT` | ✅ | CAS database port (default `3306`) |
+| `CAS_USER` | ✅ | CAS DB user (needs full CRUD on cas_db) |
+| `CAS_PASSWORD` | ✅ | CAS DB password |
+| `CAS_DATABASE` | ✅ | CAS database name (default `cas_db`) |
+| `POLL_INTERVAL_SEC` | ➖ | Polling interval in seconds (default `10`) |
+| `WS_DISPATCH_URL` | ➖ | Dispatcher WebSocket URL (default `ws://localhost:8000/ws/dispatch`) |
+| `MORPROMT_CLIENT_KEY` | ➖ | LINE Morpromt client key (optional) |
+| `MORPROMT_SECRET_KEY` | ➖ | LINE Morpromt secret key (optional) |
+
+### `cas-ws-dispatcher/.env`
+
+Same `HIS_*` and `CAS_*` variables as above (no Morpromt keys needed here).
+
+### `cas-client/.env`
+
+| Variable | Required | Description |
+|---|---|---|
+| `CAS_WS_URL` | ✅ | WebSocket URL e.g. `ws://10.0.1.X:8000/ws/alerts` |
+
+## Security Notes
+
+- The HIS database account **must** have `SELECT`-only privileges.
+- **Never commit `.env` files** — they are excluded via `.gitignore`.
+- For sensitive environments, consider running the dispatcher behind a reverse proxy (Nginx/Caddy) with TLS (`wss://`).
+
+## Database Maintenance
+
+Run `cas-server/sql/housekeeping.sql` periodically (e.g. monthly via Task Scheduler) to prune old records and reclaim disk space.

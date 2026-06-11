@@ -7,16 +7,17 @@ logger = logging.getLogger(__name__)
 
 MORPROMT_API_URL = "https://morpromt2f.moph.go.th/api/notify/send"
 
+
 def _build_patient_body(alert_data: dict) -> list:
-    metadata = alert_data.get('metadata', {})
-    
-    visit_id = str(alert_data.get('visit_id', ''))
-    patient_id = str(metadata.get('hn', '-'))
-    patient_name = str(metadata.get('patient_name', '-'))
-    dept_name = str(metadata.get('department_name', 'ไม่ระบุ'))
-    vsttime = str(metadata.get('vsttime', '-'))
-    vstdate = alert_data.get('timestamp', datetime.now()).strftime('%Y-%m-%d')
-    full_date = f"{vstdate} {vsttime}"
+    metadata = alert_data.get("metadata", {})
+
+    visit_id     = str(alert_data.get("visit_id", ""))
+    patient_id   = str(metadata.get("hn", "-"))
+    patient_name = str(metadata.get("patient_name", "-"))
+    dept_name    = str(metadata.get("department_name", "ไม่ระบุ"))
+    vsttime      = str(metadata.get("vsttime", "-"))
+    vstdate      = alert_data.get("timestamp", datetime.now()).strftime("%Y-%m-%d")
+    full_date    = f"{vstdate} {vsttime}"
 
     return [
         {
@@ -26,14 +27,14 @@ def _build_patient_body(alert_data: dict) -> list:
             "size": "xl",
             "color": "#000000",
             "wrap": True,
-            "margin": "md"
+            "margin": "md",
         },
         {
             "type": "text",
             "text": f"HN: {patient_id}   |   VN: {visit_id}",
             "size": "sm",
             "color": "#8c8c8c",
-            "margin": "sm"
+            "margin": "sm",
         },
         {"type": "separator", "margin": "lg"},
         {
@@ -52,6 +53,7 @@ def _build_patient_body(alert_data: dict) -> list:
         },
     ]
 
+
 def _build_risk_details_section(detail_str: str) -> list:
     section = [
         {"type": "separator", "margin": "lg"},
@@ -60,7 +62,7 @@ def _build_risk_details_section(detail_str: str) -> list:
             "weight": "bold", "size": "sm", "margin": "md", "color": "#d4380d",
         },
     ]
-    risk_details = [d.strip() for d in detail_str.split('|') if d.strip()]
+    risk_details = [d.strip() for d in detail_str.split("|") if d.strip()]
     for detail in risk_details:
         section.append({
             "type": "text", "text": f"• {detail}",
@@ -68,9 +70,10 @@ def _build_risk_details_section(detail_str: str) -> list:
         })
     return section
 
+
 def _send_via_morpromt(flex_message: dict, visit_number: str, label: str) -> None:
     if not MORPROMT_CLIENT_KEY or not MORPROMT_SECRET_KEY:
-        logger.warning(f"Morpromt keys missing. Skipped sending {label} for Visit {visit_number}")
+        logger.warning(f"Morpromt keys missing — skipping LINE alert ({label}) for visit {visit_number}.")
         return
 
     headers = {
@@ -83,61 +86,67 @@ def _send_via_morpromt(flex_message: dict, visit_number: str, label: str) -> Non
     try:
         response = requests.post(MORPROMT_API_URL, json=payload, headers=headers, timeout=10)
         response.raise_for_status()
-        logger.info(f"Successfully sent {label} for Visit Number {visit_number}")
-    except Exception as e:
-        logger.error(f"Failed to send {label} for Visit {visit_number}: {e}")
+        logger.info(f"LINE alert sent: {label} for visit {visit_number}.")
+    except Exception:
+        logger.exception(f"Failed to send LINE alert ({label}) for visit {visit_number}.")
 
-def print_alert(alert_data):
-    """Print formatted alert to console."""
-    ts = alert_data.get('timestamp', datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
-    ct = alert_data.get('change_type', '')
 
-    if ct == 'HIGH_TO_NOT':
+def print_alert(alert_data: dict) -> None:
+    """Log a formatted alert summary to the application log."""
+    ts = alert_data.get("timestamp", datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+    ct = alert_data.get("change_type", "")
+    severity = (alert_data.get("severity") or "unknown").upper()
+
+    if ct == "HIGH_TO_NOT":
         header_text = "✅ [CANCEL ALERT] Target conditions resolved"
-    elif ct == 'NOT_TO_HIGH':
+    elif ct == "NOT_TO_HIGH":
         header_text = "🚨 [NEW ALERT] Risk detected"
     else:
         header_text = "🚨 CLINICAL ALERT"
 
-    metadata = alert_data.get('metadata', {})
+    metadata = alert_data.get("metadata", {})
     patient_info = ""
     if metadata:
-        patient_info = f" | HN: {metadata.get('hn', '-')} | Name: {metadata.get('patient_name', '-')} | Time: {metadata.get('vsttime', '-')}"
+        patient_info = (
+            f" | HN: {metadata.get('hn', '-')}"
+            f" | Name: {metadata.get('patient_name', '-')}"
+            f" | Time: {metadata.get('vsttime', '-')}"
+        )
 
-    print("\n" + "="*60)
-    print(f"{header_text} | {ts}")
-    print(f"   Visit ID:  {alert_data.get('visit_id')} {patient_info}")
-    print(f"   Criteria:  {alert_data.get('criteria_name')}")
-    print(f"   Category:  {alert_data.get('category')}")
-    print(f"   Severity:  {alert_data.get('severity').upper()}")
-    print("-" * 60)
-    print(f"   Detail:    {alert_data.get('detail')}")
-    print("="*60 + "\n")
+    logger.info(
+        f"{header_text} | {ts} | "
+        f"Visit={alert_data.get('visit_id')}{patient_info} | "
+        f"Criteria={alert_data.get('criteria_name')} | "
+        f"Category={alert_data.get('category')} | "
+        f"Severity={severity} | "
+        f"Detail={alert_data.get('detail')}"
+    )
+
 
 def send_line(alert_data: dict) -> None:
-    """Send LINE Flex Message via Morpromt."""
-    change_type = alert_data.get('change_type', '')
-    metadata = alert_data.get('metadata', {})
-    visit_id = str(alert_data.get('visit_id', ''))
-    patient_name = str(metadata.get('patient_name', '-'))
-    criteria_name = alert_data.get('criteria_name', 'Clinical Alert')
+    """Send a LINE Flex Message via the Morpromt API."""
+    change_type  = alert_data.get("change_type", "")
+    metadata     = alert_data.get("metadata", {})
+    visit_id     = str(alert_data.get("visit_id", ""))
+    patient_name = str(metadata.get("patient_name", "-"))
+    criteria_name = alert_data.get("criteria_name", "Clinical Alert")
 
     if change_type == "NOT_TO_HIGH":
-        header_text = criteria_name
-        sub_text = "🚨 พบผู้ป่วยเข้าเกณฑ์ / ความเสี่ยงใหม่"
-        header_color = "#cf1322"  # Deep Red
-        alt_text = f"🚨 {criteria_name}: {patient_name}"
+        header_text  = criteria_name
+        sub_text     = "🚨 พบผู้ป่วยเข้าเกณฑ์ / ความเสี่ยงใหม่"
+        header_color = "#cf1322"
+        alt_text     = f"🚨 {criteria_name}: {patient_name}"
     elif change_type == "HIGH_TO_NOT":
-        header_text = criteria_name
-        sub_text = "🟢 ผู้ป่วยไม่อยู่ในกลุ่มเสี่ยงแล้ว (ข้อมูลถูกแก้ไข)"
-        header_color = "#389e0d"  # Forest Green
-        alt_text = f"🟢 พ้นกลุ่มเสี่ยง: {patient_name}"
+        header_text  = criteria_name
+        sub_text     = "🟢 ผู้ป่วยไม่อยู่ในกลุ่มเสี่ยงแล้ว (ข้อมูลถูกแก้ไข)"
+        header_color = "#389e0d"
+        alt_text     = f"🟢 พ้นกลุ่มเสี่ยง: {patient_name}"
     else:
         return
 
     body_contents = _build_patient_body(alert_data)
 
-    detail_str = alert_data.get('detail')
+    detail_str = alert_data.get("detail")
     if detail_str and change_type != "HIGH_TO_NOT":
         body_contents.extend(_build_risk_details_section(detail_str))
 
@@ -149,8 +158,10 @@ def send_line(alert_data: dict) -> None:
             "header": {
                 "type": "box", "layout": "vertical",
                 "contents": [
-                    {"type": "text", "text": header_text, "weight": "bold", "size": "lg", "color": "#ffffff", "wrap": True},
-                    {"type": "text", "text": sub_text, "color": "#ffffff", "size": "sm", "wrap": True},
+                    {"type": "text", "text": header_text, "weight": "bold",
+                     "size": "lg", "color": "#ffffff", "wrap": True},
+                    {"type": "text", "text": sub_text, "color": "#ffffff",
+                     "size": "sm", "wrap": True},
                 ],
                 "backgroundColor": header_color,
             },
@@ -163,7 +174,8 @@ def send_line(alert_data: dict) -> None:
 
     _send_via_morpromt(flex_message, visit_id, f"LINE alert ({change_type})")
 
-def fire_alert(alert_data):
-    """Main entry point for firing an alert across all channels."""
+
+def fire_alert(alert_data: dict) -> None:
+    """Main entry point: log the alert and send via all configured channels."""
     print_alert(alert_data)
     send_line(alert_data)

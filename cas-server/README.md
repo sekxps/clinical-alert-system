@@ -17,7 +17,7 @@ Copy the SQL scripts found in `/sql` into your CAS database management tool:
 (*Note: Make sure to read `housekeeping.sql` for tips on clearing old data over time*).
 
 ### 2. Environment Setup
-Rename `.env.example` to `.env` and fill in your hospital's specific HIS and CAS database credentials.
+Rename `.env.example` to `.env` and fill in your hospital's specific HIS and CAS database credentials, WebSocket dispatcher URL, and (optionally) Morpromt LINE API keys.
 **Security Note:** The HIS DB account should be restricted strictly to **Read-Only (SELECT)** privileges.
 
 ### 3. Installation
@@ -35,3 +35,13 @@ python run_server.py
 
 ## Extending (API / Line Notify)
 To send notifications outwards to a specific Line Notify or GUI API frontend, insert your custom REST payload functions directly into the `fire_alert()` block within `alert.py`.
+
+## Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---|---|---|
+| Server exits immediately on start | Missing env vars | Check `.env` matches `.env.example` exactly |
+| `No active criteria found` warning | `criteria` table empty | Run `sql/seed.sql` on the CAS database |
+| HIS queries return 0 visits | Wrong date / DB connection | Verify `HIS_DATABASE` and run `python check_db.py` |
+| LINE alerts not sent | Morpromt keys missing or wrong | Check `MORPROMT_CLIENT_KEY` / `MORPROMT_SECRET_KEY` in `.env` |
+| High CPU / DB load | `POLL_INTERVAL_SEC` too low | Increase to `30` or `60` seconds |

@@ -1,21 +1,59 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import sys
+import logging
+from contextlib import asynccontextmanager
 import asyncio
-from typing import List
 import json
 import aiomysql
 from datetime import datetime
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from database import setup_cas_pool, setup_his_pool, get_pool, get_his_pool
 
-app = FastAPI()
+logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Logging Configuration
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+
+
+# ---------------------------------------------------------------------------
+# Application Lifespan (replaces deprecated @app.on_event("startup"))
+# ---------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: initialise DB pools and kick off the background polling task."""
+    await setup_cas_pool()
+    await setup_his_pool()
+    task = asyncio.create_task(poll_database_for_alerts())
+    logger.info("CAS WebSocket Dispatcher started.")
+    yield
+    task.cancel()
+    logger.info("CAS WebSocket Dispatcher stopped.")
+
+
+app = FastAPI(title="CAS WebSocket Dispatcher", lifespan=lifespan)
+
+
+# ---------------------------------------------------------------------------
+# Connection Manager
+# ---------------------------------------------------------------------------
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        # Send history / backlog of unseen alerts to the newly connected client
-        from database import get_pool, get_his_pool
+        logger.info(
+            f"Client connected: {websocket.client}. "
+            f"Total connections: {len(self.active_connections)}"
+        )
+        # Send backlog of unseen, unresolved alerts to the newly-connected client
         pool = get_pool()
         his_pool = get_his_pool()
         if pool:
@@ -23,8 +61,8 @@ class ConnectionManager:
                 async with pool.acquire() as conn:
                     async with conn.cursor(aiomysql.DictCursor) as cur:
                         query = """
-                            SELECT a.id, a.visit_id, c.name as type, 
-                                   a.detail as message, a.alerted_at as timestamp 
+                            SELECT a.id, a.visit_id, c.name AS type,
+                                   a.detail AS message, a.alerted_at AS timestamp
                             FROM alerts a
                             JOIN criteria c ON a.criteria_id = c.id
                             WHERE a.seen = 0 AND a.resolved_at IS NULL
@@ -33,34 +71,54 @@ class ConnectionManager:
                         await cur.execute(query)
                         alerts = await cur.fetchall()
                         for alert in alerts:
-                            if 'timestamp' in alert and alert['timestamp']:
-                                alert['timestamp'] = alert['timestamp'].isoformat()
-                            
+                            if alert.get("timestamp"):
+                                alert["timestamp"] = alert["timestamp"].isoformat()
                             await attach_his_metadata(alert, his_pool)
-                            alert['action'] = 'alert'
-                            await websocket.send_text(json.dumps(alert))
-            except Exception as e:
-                print(f"Error fetching backlog on connection: {e}")
+                            alert["action"] = "alert"
+                            await websocket.send_text(json.dumps(alert, default=str))
+                logger.info(
+                    f"Sent {len(alerts)} backlog alert(s) to new client {websocket.client}."
+                )
+            except Exception:
+                logger.exception(f"Error sending backlog to client {websocket.client}.")
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+            logger.info(
+                f"Client disconnected: {websocket.client}. "
+                f"Remaining connections: {len(self.active_connections)}"
+            )
 
     async def broadcast(self, message: dict):
+        """Broadcast a message to all connected clients, pruning dead connections."""
+        dead: list[WebSocket] = []
         for connection in self.active_connections:
             try:
-                await connection.send_text(json.dumps(message))
+                await connection.send_text(json.dumps(message, default=str))
             except Exception:
-                pass
+                logger.warning(
+                    f"Failed to send to client {connection.client} — marking for removal."
+                )
+                dead.append(connection)
+        for ws in dead:
+            self.disconnect(ws)
 
-async def attach_his_metadata(alert: dict, his_pool):
-    import aiomysql
-    alert['patient_name'] = '-'
-    alert['patient_hn'] = '-'
-    alert['department'] = 'ไม่ระบุ'
-    alert['vsttime'] = '-'
-    
-    if not his_pool or 'visit_id' not in alert:
+
+manager = ConnectionManager()
+
+
+# ---------------------------------------------------------------------------
+# HIS Metadata Enrichment
+# ---------------------------------------------------------------------------
+async def attach_his_metadata(alert: dict, his_pool) -> None:
+    """Enrich an alert dict with patient metadata from the HIS database."""
+    alert.setdefault("patient_name", "-")
+    alert.setdefault("patient_hn", "-")
+    alert.setdefault("department", "ไม่ระบุ")
+    alert.setdefault("vsttime", "-")
+
+    if not his_pool or "visit_id" not in alert:
         return
 
     try:
@@ -75,31 +133,25 @@ async def attach_his_metadata(alert: dict, his_pool):
                     LEFT JOIN spclty SP ON SP.spclty = VS.spclty
                     WHERE VS.vn = %s
                 """
-                await h_cur.execute(q, (alert['visit_id'],))
+                await h_cur.execute(q, (alert["visit_id"],))
                 res = await h_cur.fetchone()
                 if res:
-                    alert['patient_name'] = res.get('patient_name') or '-'
-                    alert['patient_hn'] = res.get('hn') or '-'
-                    alert['department'] = res.get('department_name') or 'ไม่ระบุ'
-                    alert['vsttime'] = str(res.get('vsttime')) if res.get('vsttime') else '-'
-    except Exception as e:
-        print(f"Error fetching HIS metadata: {e}")
+                    alert["patient_name"] = res.get("patient_name") or "-"
+                    alert["patient_hn"] = res.get("hn") or "-"
+                    alert["department"] = res.get("department_name") or "ไม่ระบุ"
+                    alert["vsttime"] = str(res.get("vsttime")) if res.get("vsttime") else "-"
+    except Exception:
+        logger.exception(f"Error fetching HIS metadata for visit_id={alert.get('visit_id')}.")
 
-manager = ConnectionManager()
 
-@app.on_event("startup")
-async def startup_event():
-    from database import setup_cas_pool, setup_his_pool
-    await setup_cas_pool()
-    await setup_his_pool()
-    asyncio.create_task(poll_database_for_alerts())
-
+# ---------------------------------------------------------------------------
+# Background Database Polling
+# ---------------------------------------------------------------------------
 async def poll_database_for_alerts():
-    """Polls the CAS database for new alerts to broadcast"""
-    from database import get_pool, get_his_pool
+    """Poll the CAS database every 5 s and broadcast new alerts to all clients."""
     last_processed_id = 0
-    poll_interval = 5  # Check every 5 seconds
-    
+    poll_interval = 5
+
     while True:
         try:
             pool = get_pool()
@@ -108,8 +160,8 @@ async def poll_database_for_alerts():
                 async with pool.acquire() as conn:
                     async with conn.cursor(aiomysql.DictCursor) as cur:
                         query = """
-                            SELECT a.id, a.visit_id, c.name as type, 
-                                   a.detail as message, a.alerted_at as timestamp 
+                            SELECT a.id, a.visit_id, c.name AS type,
+                                   a.detail AS message, a.alerted_at AS timestamp
                             FROM alerts a
                             JOIN criteria c ON a.criteria_id = c.id
                             WHERE a.id > %s AND a.seen = 0
@@ -117,25 +169,31 @@ async def poll_database_for_alerts():
                         """
                         await cur.execute(query, (last_processed_id,))
                         new_alerts = await cur.fetchall()
-                        
+
                         for alert in new_alerts:
-                            # Convert datetime back to ISO format string
-                            if 'timestamp' in alert and alert['timestamp']:
-                                alert['timestamp'] = alert['timestamp'].isoformat()
-                                
+                            if alert.get("timestamp"):
+                                alert["timestamp"] = alert["timestamp"].isoformat()
                             await attach_his_metadata(alert, his_pool)
-                            alert['action'] = 'alert'
-                                
-                            print(f"Broadcasting new alert: {alert['type']} for HN {alert['patient_hn']}")
+                            alert["action"] = "alert"
+
+                            logger.info(
+                                f"Broadcasting alert id={alert['id']} "
+                                f"type={alert['type']} hn={alert['patient_hn']}"
+                            )
                             await manager.broadcast(alert)
-                            
-                            # Update our pointer logic
-                            last_processed_id = max(last_processed_id, alert['id'])
-        except Exception as e:
-            print(f"Error polling database: {e}")
-            
+                            last_processed_id = max(last_processed_id, alert["id"])
+        except asyncio.CancelledError:
+            logger.info("Polling task cancelled — shutting down.")
+            raise
+        except Exception:
+            logger.exception("Error during database polling — will retry next interval.")
+
         await asyncio.sleep(poll_interval)
 
+
+# ---------------------------------------------------------------------------
+# WebSocket Endpoint
+# ---------------------------------------------------------------------------
 @app.websocket("/ws/alerts")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
@@ -146,21 +204,30 @@ async def websocket_endpoint(websocket: WebSocket):
                 payload = json.loads(data)
                 if payload.get("action") == "acknowledge":
                     alert_id = payload.get("id")
-                    if alert_id:
-                        from database import get_pool
-                        import aiomysql
+                    if alert_id is not None:
                         pool = get_pool()
                         if pool:
                             async with pool.acquire() as conn:
                                 async with conn.cursor() as cur:
                                     await cur.execute(
                                         "UPDATE alerts SET seen = 1 WHERE id = %s",
-                                        (alert_id,)
+                                        (int(alert_id),),
                                     )
-                                    await conn.commit()
-                        print(f"Acknowledged alert ID: {alert_id}")
-                        # Removed dismiss broadcast so other machines keep their popups
-            except Exception as e:
-                print(f"Error handling client message: {e}")
+                            logger.info(f"Alert id={alert_id} acknowledged.")
+            except (json.JSONDecodeError, ValueError, TypeError):
+                logger.warning(f"Received invalid payload from {websocket.client}: {data!r}")
+            except Exception:
+                logger.exception(f"Error handling message from {websocket.client}.")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+# ---------------------------------------------------------------------------
+# Health Check
+# ---------------------------------------------------------------------------
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "ok",
+        "connected_clients": len(manager.active_connections),
+    }
