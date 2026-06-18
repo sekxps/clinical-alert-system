@@ -10,7 +10,14 @@ from toast_notification import ToastNotification
 # Logging Setup (StreamHandler and FileHandler)
 # ---------------------------------------------------------------------------
 import os
-log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cas_client.log")
+from pathlib import Path
+
+if getattr(sys, 'frozen', False):
+    base_dir = Path(sys.executable).parent
+else:
+    base_dir = Path(__file__).parent
+
+log_file = os.path.join(base_dir, "cas_client.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
