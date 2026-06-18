@@ -8,8 +8,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 from PyQt6.QtCore import QThread, pyqtSignal
 
-# Load .env from the cas-client folder
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+# Load .env from the executable directory if frozen, else from script dir
+if getattr(sys, 'frozen', False):
+    base_dir = Path(sys.executable).parent
+else:
+    base_dir = Path(__file__).parent
+
+load_dotenv(dotenv_path=base_dir / ".env")
 
 logger = logging.getLogger(__name__)
 

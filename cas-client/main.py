@@ -7,13 +7,18 @@ from websocket_worker import WebSocketWorker
 from toast_notification import ToastNotification
 
 # ---------------------------------------------------------------------------
-# Logging Setup (StreamHandler — client is a desktop app, no log file needed)
+# Logging Setup (StreamHandler and FileHandler)
 # ---------------------------------------------------------------------------
+import os
+log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cas_client.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(log_file, encoding='utf-8')
+    ],
 )
 logger = logging.getLogger(__name__)
 
@@ -53,6 +58,12 @@ class CASDesktopApp(QObject):
 
         menu.addSeparator()
 
+        self.logs_action = QAction("View Logs")
+        self.logs_action.triggered.connect(self.open_logs)
+        menu.addAction(self.logs_action)
+
+        menu.addSeparator()
+
         quit_action = QAction("Exit App")
         quit_action.triggered.connect(self.quit_app)
         menu.addAction(quit_action)
@@ -60,6 +71,17 @@ class CASDesktopApp(QObject):
         self.tray.setContextMenu(menu)
         self.tray.show()
         self.tray.setToolTip("CAS Monitoring")
+
+    def open_logs(self):
+        import platform
+        import subprocess
+        if not os.path.exists(log_file):
+            open(log_file, 'a').close()
+            
+        if platform.system() == 'Windows':
+            os.startfile(log_file)
+        else:
+            subprocess.call(('open', log_file))
 
     @pyqtSlot(dict)
     def on_new_alert(self, alert_data: dict):
@@ -100,10 +122,18 @@ class CASDesktopApp(QObject):
     @pyqtSlot(bool)
     def on_connection_status(self, is_connected: bool):
         if is_connected:
+            icon = self.app.style().standardIcon(
+                self.app.style().StandardPixmap.SP_MessageBoxInformation
+            )
+            self.tray.setIcon(icon)
             self.status_action.setText("Status: Connected ✅")
             self.tray.setToolTip("CAS Monitoring — Connected")
             logger.info("WebSocket connection established.")
         else:
+            icon = self.app.style().standardIcon(
+                self.app.style().StandardPixmap.SP_MessageBoxCritical
+            )
+            self.tray.setIcon(icon)
             self.status_action.setText("Status: Disconnected / Retrying...")
             self.tray.setToolTip("CAS Monitoring — Disconnected")
             logger.warning("WebSocket disconnected — worker will attempt reconnection.")

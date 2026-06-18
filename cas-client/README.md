@@ -34,8 +34,29 @@ python main.py
 
 ## Running at Startup (Windows)
 
-To launch the client automatically when a user logs in, create a shortcut to `main.py` (or a compiled `.exe`) in:
+To launch the client automatically when a user logs in:
 
+**Option 1: Using the provided script**
+Simply run `setup_startup.bat`. It will automatically create a shortcut in your Startup folder that runs the client in the background without a console window.
+
+**Option 2: Manual Setup**
+Create a shortcut to `main.py` (or a compiled `.exe`) in:
 ```
 %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
 ```
+
+## Building Executable (.exe)
+
+For easier distribution to multiple client machines without needing to install Python, you can compile the client into a single executable file:
+
+1. Activate your virtual environment
+2. Install PyInstaller:
+   ```bash
+   pip install pyinstaller
+   ```
+3. Run the build command:
+   ```bash
+   pyinstaller --noconsole --onefile --name "ClinicalAlert" main.py
+   ```
+4. The generated `ClinicalAlert.exe` will be located in the `dist/` directory.
+5. To deploy, simply copy the `.exe` file along with your `.env` file to the target machine.
