@@ -13,12 +13,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Logging Configuration
 # ---------------------------------------------------------------------------
+class IgnoreWinError121Filter(logging.Filter):
+    """Filter out noisy OS-level semaphore timeout logs from websockets library."""
+    def filter(self, record):
+        if record.exc_info:
+            _, exc_value, _ = record.exc_info
+            if isinstance(exc_value, OSError) and getattr(exc_value, 'winerror', None) == 121:
+                return False
+        return True
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
+
+logging.getLogger("websockets").addFilter(IgnoreWinError121Filter())
+logging.getLogger("websockets.server").addFilter(IgnoreWinError121Filter())
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +203,9 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception:
                 logger.exception(f"Error handling message from {websocket.client}.")
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        logger.warning(f"Connection dropped unexpectedly for {websocket.client}")
         manager.disconnect(websocket)
 
 

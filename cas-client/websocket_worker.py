@@ -44,7 +44,7 @@ class WebSocketWorker(QThread):
                 )
                 self.ws.on_open = self.on_open
                 # run_forever blocks; ping keeps the connection alive
-                self.ws.run_forever(ping_interval=30, ping_timeout=10)
+                self.ws.run_forever(ping_interval=60, ping_timeout=30)
             except Exception:
                 logger.exception("WebSocket thread encountered an unexpected error.")
 

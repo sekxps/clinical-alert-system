@@ -10,6 +10,7 @@ from toast_notification import ToastNotification
 # Logging Setup (StreamHandler and FileHandler)
 # ---------------------------------------------------------------------------
 import os
+import winreg
 from pathlib import Path
 
 if getattr(sys, 'frozen', False):
@@ -65,6 +66,13 @@ class CASDesktopApp(QObject):
 
         menu.addSeparator()
 
+        self.startup_action = QAction("Run on Startup", checkable=True)
+        self.startup_action.setChecked(self.is_run_on_startup())
+        self.startup_action.triggered.connect(self.toggle_startup)
+        menu.addAction(self.startup_action)
+
+        menu.addSeparator()
+
         self.logs_action = QAction("View Logs")
         self.logs_action.triggered.connect(self.open_logs)
         menu.addAction(self.logs_action)
@@ -78,6 +86,35 @@ class CASDesktopApp(QObject):
         self.tray.setContextMenu(menu)
         self.tray.show()
         self.tray.setToolTip("CAS Monitoring")
+
+    def is_run_on_startup(self) -> bool:
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
+            value, _ = winreg.QueryValueEx(key, "CASClient")
+            winreg.CloseKey(key)
+            return sys.executable in value
+        except FileNotFoundError:
+            return False
+
+    @pyqtSlot(bool)
+    def toggle_startup(self, enable: bool):
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_ALL_ACCESS)
+            if enable:
+                exe_path = f'"{sys.executable}"'
+                if not getattr(sys, 'frozen', False):
+                    exe_path = f'"{sys.executable}" "{os.path.abspath(__file__)}"'
+                winreg.SetValueEx(key, "CASClient", 0, winreg.REG_SZ, exe_path)
+                logger.info("Enabled run on startup.")
+            else:
+                try:
+                    winreg.DeleteValue(key, "CASClient")
+                    logger.info("Disabled run on startup.")
+                except FileNotFoundError:
+                    pass
+            winreg.CloseKey(key)
+        except Exception as e:
+            logger.error(f"Failed to modify startup registry key: {e}")
 
     def open_logs(self):
         import platform
