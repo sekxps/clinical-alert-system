@@ -6,16 +6,18 @@ import aiomysql
 # Load env vars
 load_dotenv()
 
-DB_CAS_HOST = os.getenv("DB_CAS_HOST", "localhost")
-DB_CAS_USER = os.getenv("DB_CAS_USER", "cas_user")
-DB_CAS_PASS = os.getenv("DB_CAS_PASS", "cas_password")
-DB_CAS_NAME = os.getenv("DB_CAS_NAME", "cas")
+DB_CAS_HOST = os.getenv("CAS_HOST", "localhost")
+DB_CAS_USER = os.getenv("CAS_USER", "cas_user")
+DB_CAS_PASS = os.getenv("CAS_PASSWORD", "")
+DB_CAS_NAME = os.getenv("CAS_DATABASE", "cas_db")
+DB_CAS_PORT = int(os.getenv("CAS_PORT", "3306"))
 
 async def test_cast():
     print("Connecting to CAS Database...")
     try:
         conn = await aiomysql.connect(
             host=DB_CAS_HOST,
+            port=DB_CAS_PORT,
             user=DB_CAS_USER,
             password=DB_CAS_PASS,
             db=DB_CAS_NAME,

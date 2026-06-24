@@ -34,16 +34,7 @@ python main.py
 
 ## Running at Startup (Windows)
 
-To launch the client automatically when a user logs in:
-
-**Option 1: Using the provided script**
-Simply run `setup_startup.bat`. It will automatically create a shortcut in your Startup folder that runs the client in the background without a console window.
-
-**Option 2: Manual Setup**
-Create a shortcut to `main.py` (or a compiled `.exe`) in:
-```
-%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
-```
+To launch the client automatically when a user logs in, simply right-click the system tray icon and check **"Run on Startup"**. The app will automatically configure the Windows Registry.
 
 ## Building Executable (.exe)
 
