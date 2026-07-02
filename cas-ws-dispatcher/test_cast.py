@@ -29,18 +29,20 @@ async def test_cast():
             res = await cur.fetchone()
             criteria_id = res[0] if res else 1
 
+            import uuid
+            test_visit_id = f"test-{uuid.uuid4().hex[:6]}"
             query = """
                 INSERT INTO alerts (visit_id, criteria_id, detail, seen)
                 VALUES (%s, %s, %s, 0)
             """
-            print(f"Injecting test alert (visit_id='0000000', criteria_id={criteria_id})...")
-            await cur.execute(query, ("0000000", criteria_id, "นี่คือการทดสอบแจ้งเตือนจาก Script ทดสอบ (Test Cast)"))
+            print(f"Injecting test alert (visit_id='{test_visit_id}', criteria_id={criteria_id})...")
+            await cur.execute(query, (test_visit_id, criteria_id, "นี่คือการทดสอบแจ้งเตือนจาก Script ทดสอบ (Test Cast)"))
             await conn.commit()
-            print("✅ Test alert successfully injected into database!")
-            print("💡 The dispatcher should pick it up within 5 seconds and broadcast it to all clients.")
+            print("[SUCCESS] Test alert successfully injected into database!")
+            print("[INFO] The dispatcher should pick it up within 5 seconds and broadcast it to all clients.")
         conn.close()
     except Exception as e:
-        print(f"❌ Error injecting test alert: {e}")
+        print(f"[ERROR] Error injecting test alert: {e}")
 
 if __name__ == "__main__":
     asyncio.run(test_cast())
